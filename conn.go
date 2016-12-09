@@ -108,8 +108,34 @@ func (c *conn) gauge(prefix, bucket string, value interface{}, tags string) {
 	c.mu.Unlock()
 }
 
+func (c *conn) gaugeRel(prefix, bucket string, value interface{}, tags string) {
+	c.mu.Lock()
+	l := len(c.buf)
+	// To set a gauge to a negative value we must first set it to 0.
+	// https://github.com/etsy/statsd/blob/master/docs/metric_types.md#gauges
+	if isNegative(value) {
+		c.appendBucket(prefix, bucket, tags)
+		c.appendGauge(0, tags)
+		c.appendBucket(prefix, bucket, tags)
+		c.appendGauge(value, tags)
+		c.flushIfBufferFull(l)
+		c.mu.Unlock()
+	} else {
+		c.appendBucket(prefix, bucket, tags)
+		c.appendPositiveGauge(value, tags)
+		c.flushIfBufferFull(l)
+		c.mu.Unlock()
+	}
+}
+
 func (c *conn) appendGauge(value interface{}, tags string) {
 	c.appendNumber(value)
+	c.appendType("g")
+	c.closeMetric(tags)
+}
+
+func (c *conn) appendPositiveGauge(value interface{}, tags string) {
+	c.appendPositiveNumber(value)
 	c.appendType("g")
 	c.closeMetric(tags)
 }
@@ -134,6 +160,36 @@ func (c *conn) appendString(s string) {
 }
 
 func (c *conn) appendNumber(v interface{}) {
+	switch n := v.(type) {
+	case int:
+		c.buf = strconv.AppendInt(c.buf, int64(n), 10)
+	case uint:
+		c.buf = strconv.AppendUint(c.buf, uint64(n), 10)
+	case int64:
+		c.buf = strconv.AppendInt(c.buf, n, 10)
+	case uint64:
+		c.buf = strconv.AppendUint(c.buf, n, 10)
+	case int32:
+		c.buf = strconv.AppendInt(c.buf, int64(n), 10)
+	case uint32:
+		c.buf = strconv.AppendUint(c.buf, uint64(n), 10)
+	case int16:
+		c.buf = strconv.AppendInt(c.buf, int64(n), 10)
+	case uint16:
+		c.buf = strconv.AppendUint(c.buf, uint64(n), 10)
+	case int8:
+		c.buf = strconv.AppendInt(c.buf, int64(n), 10)
+	case uint8:
+		c.buf = strconv.AppendUint(c.buf, uint64(n), 10)
+	case float64:
+		c.buf = strconv.AppendFloat(c.buf, n, 'f', -1, 64)
+	case float32:
+		c.buf = strconv.AppendFloat(c.buf, float64(n), 'f', -1, 32)
+	}
+}
+
+func (c *conn) appendPositiveNumber(v interface{}) {
+	c.buf = append(c.buf, []byte("+")...)
 	switch n := v.(type) {
 	case int:
 		c.buf = strconv.AppendInt(c.buf, int64(n), 10)
